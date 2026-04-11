@@ -1,0 +1,8 @@
+spec_version: 1
+name: courtroom_env
+description: "LLM agent plays a courtroom lawyer across 3 real Indian legal cases (easy/medium/hard). Judge grader scores arguments on fact citation, law citation, structure, and round-specific quality."
+type: space
+runtime: fastapi
+app: server.app:app
+port: 7860
+
