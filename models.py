@@ -25,6 +25,7 @@ class CourtObservation(BaseModel):
     reward: float = 0.0
     done: bool = False
     success: bool
+    argument_history: str = ""
 
 
 class CourtState(State):

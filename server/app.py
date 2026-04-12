@@ -1,34 +1,10 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+import sys, os, json
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-"""
-FastAPI application for the Courtroom Env Environment.
-
-This module creates an HTTP server that exposes the CourtroomEnvironment
-over HTTP and WebSocket endpoints, compatible with EnvClient.
-
-Endpoints:
-    - POST /reset: Reset the environment
-    - POST /step: Execute an action
-    - GET /state: Get current environment state
-    - GET /schema: Get action/observation schemas
-    - WS /ws: WebSocket endpoint for persistent sessions
-
-Usage:
-    # Development (with auto-reload):
-    uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
-
-    # Production:
-    uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
-
-    # Or run directly:
-    python -m server.app
-"""
-
-from openenv.core.env_server import create_app
+try:
+    from openenv.core.env_server import create_app
+except Exception as e:
+    raise ImportError("openenv is required.") from e
 
 try:
     from models import CourtAction, CourtObservation
@@ -37,9 +13,8 @@ except ModuleNotFoundError:
     from ..models import CourtAction, CourtObservation
     from .courtroom_env_environment import CourtroomEnvEnvironment
 
-
-# Create the app with web interface and README integration
-app = create_app(
+# Create the core openenv app
+_openenv_app = create_app(
     CourtroomEnvEnvironment,
     CourtAction,
     CourtObservation,
@@ -47,32 +22,78 @@ app = create_app(
     max_concurrent_envs=1,
 )
 
+TASKS_RESPONSE = json.dumps({
+    "tasks": [
+        {"task_id": "easy",   "difficulty": "easy",   "domain": "Criminal Law (IPC)"},
+        {"task_id": "medium", "difficulty": "medium",  "domain": "Employment Law"},
+        {"task_id": "hard",   "difficulty": "hard",    "domain": "Constitutional Law"},
+    ]
+}).encode()
+
+
+class CustomRoutesASGI:
+    """Pure ASGI wrapper that intercepts custom routes before openenv."""
+
+    def __init__(self, openenv_app):
+        self._app = openenv_app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            method = scope.get("method", "")
+
+            if path == "/tasks" and method == "GET":
+                await self._send_json(scope, send, TASKS_RESPONSE)
+                return
+
+            if path == "/grader" and method == "GET":
+                query = scope.get("query_string", b"").decode()
+                params = dict(p.split("=") for p in query.split("&") if "=" in p)
+                task_id = params.get("task_id", "easy")
+                argument = params.get("argument", "test")
+                try:
+                    from server.courtroom_env_environment import judge_score
+                except ModuleNotFoundError:
+                    from .courtroom_env_environment import judge_score
+                reward, feedback = judge_score(
+                    task_id, "prosecution", argument, "", "argument", 1
+                )
+                body = json.dumps({
+                    "task_id": task_id,
+                    "reward": reward,
+                    "feedback": feedback
+                }).encode()
+                await self._send_json(scope, send, body)
+                return
+
+        await self._app(scope, receive, send)
+
+    async def _send_json(self, scope, send, body: bytes):
+        await send({
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })
+
+
+# This is what uvicorn serves
+app = CustomRoutesASGI(_openenv_app)
+
 
 def main(host: str = "0.0.0.0", port: int = 8000):
-    """
-    Entry point for direct execution via uv run or python -m.
-
-    This function enables running the server without Docker:
-        uv run --project . server
-        uv run --project . server --port 8001
-        python -m courtroom_env.server.app
-
-    Args:
-        host: Host address to bind to (default: "0.0.0.0")
-        port: Port number to listen on (default: 8000)
-
-    For production deployments, consider using uvicorn directly with
-    multiple workers:
-        uvicorn courtroom_env.server.app:app --workers 4
-    """
     import uvicorn
-
     uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
     import argparse
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()

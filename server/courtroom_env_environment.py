@@ -259,6 +259,7 @@ class CourtroomEnvEnvironment(Environment):
         self._role = "prosecution"
         self._round_idx = 0
         self._attempt = 0
+        self._argument_history = []
         self._state = CourtState(episode_id=str(uuid.uuid4()), step_count=0)
 
     def reset(self, task_id: str = "easy", role: str = "prosecution") -> CourtObservation:
@@ -269,6 +270,7 @@ class CourtroomEnvEnvironment(Environment):
         self._role = role
         self._round_idx = 0
         self._attempt = 0
+        self._argument_history = []
         self._state = CourtState(
             episode_id=str(uuid.uuid4()),
             step_count=0,
@@ -301,6 +303,13 @@ class CourtroomEnvEnvironment(Environment):
 
         case = CASES[self._task_id]
         current_round = case["rounds"][min(self._round_idx, MAX_ROUNDS - 1)]
+        # Store full argument with key evidence
+        self._argument_history.append(
+            f"[Round {self._attempt} - {current_round['round']}]: {action.argument[:200]}"
+            + (f" [Evidence: {action.evidence_cited}]" if action.evidence_cited else "")
+        )
+        # Keep all rounds, not just last 3
+        history_summary = "\n".join(self._argument_history)
 
         reward, feedback = judge_score(
             self._task_id,
@@ -339,6 +348,7 @@ class CourtroomEnvEnvironment(Environment):
             applicable_laws=case["applicable_laws"],
             attempt_number=self._attempt,
             max_attempts=MAX_ROUNDS,
+            argument_history=history_summary,
             reward=reward,
             done=done,
             success=reward >= 0.75,

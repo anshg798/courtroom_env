@@ -1,6 +1,6 @@
 ---
 title: Courtroom Env
-emoji: ⚖️
+emoji: ⚖
 colorFrom: blue
 colorTo: green
 sdk: docker
@@ -10,9 +10,9 @@ pinned: false
 # CourtRoom RL Environment
 
 An OpenEnv environment where an LLM agent acts as a courtroom lawyer,
-arguing real Indian legal cases across 4 structured rounds.
-The environment's judge grader scores each argument on fact citation,
-law citation, logical structure, and round-specific quality — providing
+arguing real Indian legal cases across 4 structured rounds with full
+conversation memory. The judge grader scores each argument on fact citation,
+law citation, logical structure, and round-specific quality, providing
 a rich partial reward signal at every step.
 
 ---
@@ -20,33 +20,42 @@ a rich partial reward signal at every step.
 ## Environment Description
 
 The agent receives a real case file (facts, applicable laws, opposing argument)
-and must submit a legal argument each round. The judge grader evaluates the
-argument programmatically and returns a reward between 0.0 and 1.0.
+and must submit a legal argument each round. The environment maintains full
+conversation history across rounds so the agent can build on previous arguments.
+The judge grader evaluates programmatically and returns a reward between 0.0 and 1.0.
 
 The environment simulates the full arc of a courtroom proceeding:
-opening -> argument -> rebuttal -> closing.
+opening, argument, rebuttal, closing.
 
-This is a real-world task with immediate practical value — training LLMs
-to reason about law, cite statutes correctly, and adapt arguments based
-on feedback mirrors exactly what legal AI tools need to do.
+Real-world value: training LLMs to reason about law, cite statutes correctly,
+adapt arguments based on feedback, and maintain coherent multi-turn legal reasoning.
 
 ---
 
 ## Tasks
 
-| Task   | Case                                              | Difficulty | Domain                  |
-|--------|---------------------------------------------------|------------|-------------------------|
-| easy   | State vs Rajan Mehta — Theft at Railway Station   | Easy       | Criminal Law (IPC)      |
-| medium | Sharma vs TechCorp — Wrongful Termination         | Medium     | Employment Law          |
-| hard   | Citizen Rights Forum vs Union of India — Privacy  | Hard       | Constitutional Law      |
+| Task   | Case                                             | Difficulty | Domain             |
+|--------|--------------------------------------------------|------------|--------------------|
+| easy   | State vs Rajan Mehta, Theft at Railway Station   | Easy       | Criminal Law (IPC) |
+| medium | Sharma vs TechCorp, Wrongful Termination         | Medium     | Employment Law     |
+| hard   | Citizen Rights Forum vs Union of India, Privacy  | Hard       | Constitutional Law |
 
 Each task runs for 4 rounds: opening, argument, rebuttal, closing.
 
 ---
 
-## Action Space
+## Key Features
 
-The agent submits a CourtAction at each step:
+- Full conversation memory across rounds: agent sees all previous arguments
+- 4-component grader with partial credit at every step
+- 3 real Indian legal cases with increasing complexity
+- Hint system activates after 2 weak arguments
+- Round-specific quality scoring (rebuttal framing, closing structure)
+- Attempt penalty to reward efficiency
+
+---
+
+## Action Space
 
 | Field          | Type   | Required | Description                            |
 |----------------|--------|----------|----------------------------------------|
@@ -58,29 +67,28 @@ The agent submits a CourtAction at each step:
 
 ## Observation Space
 
-The agent receives a CourtObservation after each step:
-
-| Field             | Type   | Description                                      |
-|-------------------|--------|--------------------------------------------------|
-| task_id           | string | "easy", "medium", or "hard"                      |
-| role              | string | "prosecution" or "defense"                       |
-| case_summary      | string | Full case facts                                  |
-| current_round     | string | "opening", "argument", "rebuttal", "closing"     |
-| opposing_argument | string | What the opposing side just argued               |
-| judge_feedback    | string | Grader feedback from the last step               |
-| hint              | string | Appears after 2 weak arguments                   |
-| applicable_laws   | string | Laws relevant to this case                       |
-| attempt_number    | int    | Current round number                             |
-| max_attempts      | int    | Total rounds (4)                                 |
-| reward            | float  | Score for this step (0.0-1.0)                    |
-| done              | bool   | True when all rounds are complete                |
-| success           | bool   | True when reward >= 0.75                         |
+| Field             | Type   | Description                                  |
+|-------------------|--------|----------------------------------------------|
+| task_id           | string | easy, medium, or hard                        |
+| role              | string | prosecution or defense                       |
+| case_summary      | string | Full case facts                              |
+| current_round     | string | opening, argument, rebuttal, or closing      |
+| opposing_argument | string | What the opposing side just argued           |
+| judge_feedback    | string | Grader feedback from the last step           |
+| argument_history  | string | All previous arguments this episode          |
+| hint              | string | Appears after 2 weak arguments               |
+| applicable_laws   | string | Laws relevant to this case                   |
+| attempt_number    | int    | Current round number                         |
+| max_attempts      | int    | Total rounds (4)                             |
+| reward            | float  | Score for this step (0.0 to 1.0)             |
+| done              | bool   | True when all rounds are complete            |
+| success           | bool   | True when reward >= 0.75                     |
 
 ---
 
 ## Reward Function
 
-Partial credit is awarded at every step — the agent always gets a training signal.
+Partial credit is awarded at every step.
 
 | Component              | Max Points | Condition                                         |
 |------------------------|------------|---------------------------------------------------|
@@ -98,14 +106,14 @@ Success threshold: >= 0.75
 
 ## Baseline Scores
 
-Scores achieved by llama-3.1-8b-instant via Groq API:
+Scores achieved by llama-3.1-8b-instant via Groq API with conversation memory:
 
 | Task    | Score | Success |
 |---------|-------|---------|
-| easy    | 0.80  | Yes     |
-| medium  | 0.61  | No      |
-| hard    | 0.51  | No      |
-| average | 0.64  |         |
+| easy    | 0.90  | Yes     |
+| medium  | 0.71  | No      |
+| hard    | 0.50  | No      |
+| average | 0.703 |         |
 
 ---
 
@@ -116,7 +124,8 @@ Scores achieved by llama-3.1-8b-instant via Groq API:
 | /reset   | POST   | Start a new episode                |
 | /step    | POST   | Submit an argument, get reward     |
 | /state   | GET    | Get current episode state          |
-| /health  | GET    | Health check - returns 200 if live |
+| /health  | GET    | Health check, returns 200 if live  |
+| /tasks   | GET    | List all available tasks           |
 | /schema  | GET    | Action and observation schemas     |
 | /docs    | GET    | Auto-generated Swagger UI          |
 
@@ -128,18 +137,20 @@ Scores achieved by llama-3.1-8b-instant via Groq API:
 from client import CourtroomEnv
 from models import CourtAction
 
-with CourtroomEnv(base_url="https://YOUR_USERNAME-courtroom-env.hf.space").sync() as env:
+with CourtroomEnv(base_url="https://sihuser-courtroom-env.hf.space").sync() as env:
     result = env.reset(task_id="easy", role="prosecution")
     obs = result.observation
     print(obs.case_summary)
 
     result = env.step(CourtAction(
-        argument="Under IPC Section 378, the accused's dishonest intention is proven "
-                 "by the CCTV footage and recovery of the stolen phone.",
-        evidence_cited="IPC Section 378"
+        argument="Under IPC Section 378, the accused dishonest intention is proven "
+                 "by the CCTV footage and recovery of the stolen phone at Bangalore "
+                 "City Railway Station on 12 Jan 2026. Two eyewitnesses confirm this.",
+        evidence_cited="IPC Section 378, IPC Section 379"
     ))
     print(result.reward)
     print(result.observation.judge_feedback)
+    print(result.observation.argument_history)
 ```
 
 ---
@@ -150,7 +161,7 @@ with CourtroomEnv(base_url="https://YOUR_USERNAME-courtroom-env.hf.space").sync(
 
 - Python 3.10, 3.11, or 3.12
 - Docker Desktop
-- Hugging Face account and CLI
+- Hugging Face account
 
 ### Install dependencies
 
@@ -167,14 +178,24 @@ uvicorn server.app:app --host 0.0.0.0 --port 7860 --reload
 ### Test the server
 
 ```bash
+# Health check
 curl http://localhost:7860/health
+
+# List tasks
+curl http://localhost:7860/tasks
+
+# Reset
+curl -X POST http://localhost:7860/reset -H "Content-Type: application/json" -d "{\"task_id\": \"easy\", \"role\": \"prosecution\"}"
+
+# Step
+curl -X POST http://localhost:7860/step -H "Content-Type: application/json" -d "{\"action\": {\"argument\": \"Under IPC Section 378 the accused had clear dishonest intention proven by CCTV footage at Bangalore Railway Station on 12 Jan 2026.\", \"evidence_cited\": \"IPC Section 378\"}}"
 ```
 
 ### Run the inference script
 
 ```bash
 set API_BASE_URL=https://api.groq.com/openai/v1
-set MODEL_NAME=llama3-8b-8192
+set MODEL_NAME=llama-3.1-8b-instant
 set HF_TOKEN=your_groq_api_key_here
 set ENV_URL=http://localhost:7860
 python inference.py
@@ -204,7 +225,7 @@ docker run -p 7860:7860 courtroom-env
 
 ```
 courtroom_env/
-├── inference.py          # Baseline LLM agent (submission entry point)
+├── inference.py          # Baseline LLM agent with conversation memory
 ├── models.py             # Pydantic: CourtAction, CourtObservation, CourtState
 ├── client.py             # WebSocket client for training code
 ├── openenv.yaml          # OpenEnv spec configuration
@@ -213,7 +234,7 @@ courtroom_env/
 ├── README.md             # This file
 └── server/
     ├── app.py                        # FastAPI server
-    ├── courtroom_env_environment.py  # Core logic: cases, grader, rewards
+    ├── courtroom_env_environment.py  # Core logic: cases, grader, rewards, memory
     ├── requirements.txt              # Server dependencies
     └── Dockerfile                    # Container definition
 ```
@@ -225,3 +246,4 @@ courtroom_env/
 - OpenEnv GitHub: https://github.com/meta-pytorch/OpenEnv
 - OpenEnv Hub: https://huggingface.co/openenv
 - Hackathon: https://www.scaler.com/school-of-technology/meta-pytorch-hackathon
+- Live Environment: https://huggingface.co/spaces/sihuser/courtroom_env

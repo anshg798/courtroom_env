@@ -19,24 +19,39 @@ Your argument MUST:
 3. Directly counter the opposing argument in rebuttal rounds
 4. Use logical connectors: therefore, consequently, furthermore, however, this proves
 5. Be 60-120 words minimum
+6. In REBUTTAL rounds: start with "However," or "Contrary to the defense's claim,"
+7. In CLOSING rounds: start with "In conclusion," and summarize ALL laws cited in previous rounds
+8. NEVER repeat the same opening phrase you used in a previous round
+
+YOUR PREVIOUS ARGUMENTS ARE YOUR MEMORY - build on them, never contradict them, 
+and in closing rounds CITE EVERY LAW you mentioned across all previous rounds.
 
 DO NOT write generic arguments. ALWAYS anchor to the specific facts given."""
 
 
 def call_llm(obs) -> CourtAction:
+    # Extract key facts reminder for later rounds
+    facts_reminder = ""
+    if obs.attempt_number >= 2:
+        facts_reminder = f"\nCRITICAL: You MUST reference these specific facts in your argument: {', '.join(obs.case_summary.split('.')[:2])}"
+
     user_msg = f"""CASE: {obs.case_summary}
 
 YOUR ROLE: {obs.role}
 CURRENT ROUND: {obs.current_round}
 APPLICABLE LAWS: {obs.applicable_laws}
 
+YOUR PREVIOUS ARGUMENTS THIS EPISODE:
+{obs.argument_history if obs.argument_history else "None yet"}
+
 OPPOSING ARGUMENT:
 {obs.opposing_argument}
 
 JUDGE'S LAST FEEDBACK: {obs.judge_feedback}
 {f"HINT: {obs.hint}" if obs.hint else ""}
+{facts_reminder}
 
-Write your {obs.current_round} argument now:"""
+Write your {obs.current_round} argument. Reference specific facts AND laws:"""
 
     resp = llm.chat.completions.create(
         model=MODEL_NAME,
