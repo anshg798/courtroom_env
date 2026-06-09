@@ -245,5 +245,4 @@ courtroom_env/
 
 - OpenEnv GitHub: https://github.com/meta-pytorch/OpenEnv
 - OpenEnv Hub: https://huggingface.co/openenv
-- Hackathon: https://www.scaler.com/school-of-technology/meta-pytorch-hackathon
 - Live Environment: https://huggingface.co/spaces/sihuser/courtroom_env
